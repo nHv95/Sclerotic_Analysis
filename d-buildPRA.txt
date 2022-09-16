@@ -1,0 +1,189 @@
+/*
+Macro per la creazione di sezioni cumulative
+
+v. 0.1.0 del 29/08/2011
+
+Questa macro esegue la combinazione delle immagini passabanda 
+
+*/
+
+macro "CreaSezCumulate" {accumula();}
+
+function accumula() {
+	requires("1.42l");
+
+// Impostazione parametri tramite dialogo 
+
+	dataoffset = newArray("4","8","16","32","64");
+	listaserie = newArray("1.5","1.6","1.7","1.8","1.9","2.0");
+	Dialog.create("Impostazioni");
+	Dialog.addMessage("Ri-Costruzione progressiva di Alberi Vascolari");
+	Dialog.addMessage("\n");
+	Dialog.addMessage("La serie e' iniziata dal punto: ")+Dialog.addChoice("          ",dataoffset)+"\n";
+	Dialog.addMessage("Le soglie scelte sono basate sul rapporto: ")+Dialog.addChoice("          ",listaserie)+"\n";
+	Dialog.show();
+
+	if(isOpen("Log")){
+		selectWindow("Log");
+		run("Close");
+	}
+
+	inizio = Dialog.getChoice();
+	multi = Dialog.getChoice();
+
+// Calcolo delle soglie
+
+	ini = parseInt(inizio);
+	mul = parseFloat(multi);
+	prosoglia = newArray(7);
+	prosoglia[0] = ini;
+	prosoglia[1] = round(ini*mul);
+	prosoglia[2] = round(ini*mul*mul);
+	prosoglia[3] = round(ini*mul*mul*mul);
+	prosoglia[4] = round(ini*mul*mul*mul*mul);
+	prosoglia[5] = round(ini*mul*mul*mul*mul*mul);
+	prosoglia[6] = round(ini*mul*mul*mul*mul*mul*mul);
+	lett = newArray("a-","b-","c-","d-","e-","f-","g-");
+
+	mus = (ini+mul)*10;
+	scelta = toString(mus);
+
+// Impostazione data di esecuzione
+
+	getDateAndTime(year, month, week, day, hour, minu, sec, msec);
+	mese = month+1;
+	
+	setBatchMode(true);
+
+// Scelta della cartella contenente le cartelle con le sezioni da cumulare
+
+	showMessage("Seleziona la cartella con le cartelle contenenti le sezioni da combinare");
+	dir1 = getDirectory("Seleziona la cartella con le cartelle contenenti le sezioni da combinare");
+	list = getFileList(dir1);
+
+// Scelta della cartella in cui salvare le sezioni cumulate
+
+	showMessage("Dove salvo le sezioni cumulate?");
+	dir2 = getDirectory("Dove salvo le sezioni cumulate?");
+
+// Inizio del ciclo su tutte le cartelle
+
+	for (st=0; st<list.length; st++) {
+		subdir = dir1+list[st];
+	 	subdirtit = File.getName(subdir);
+
+// Ora creiamo e salviamo le sezioni cumulate
+
+// Crea la cartella in cui raccogliere le immagini filtrate
+
+		File.makeDirectory(dir2+"SC"+scelta+subdirtit);
+
+// Ora ciclo sulle immagini di ogni sottocartella
+
+		sublist = getFileList(subdir);	
+		titre = newArray(2);
+
+		soglia=newArray(7);
+		for(ia=0;ia<7;ia++){
+			soglia[ia]="0-"+toString(prosoglia[ia]);
+		}
+
+		topdown=newArray(7);
+		for(ib=0;ib<6;ib++){
+			topdown[ib]=toString(prosoglia[ib])+"-"+toString(prosoglia[6]);
+		}
+
+
+/*
+		if(scelta=="2,0"){
+			soglia = newArray("0-4","0-8","0-16","0-32","0-64","0-128","0-256");
+			topdown = newArray("4-256","8-256","16-256","32-256","64-256","128-256");
+		}
+		else{
+			if(scelta=="1,9"){
+				soglia = newArray("0-4","0-8","0-14","0-27","0-52","0-99","0-188");
+				topdown = newArray("4-188","8-188","14-188","27-188","52-188","99-188");
+			}
+			else{
+				if(scelta=="1,8"){
+					soglia = newArray("0-4","0-7","0-13","0-23","0-42","0-76","0-136");
+					topdown = newArray("4-136","7-136","13-136","23-136","42-136","76-136");
+				}
+				else{
+					if(scelta=="1,7"){
+						soglia = newArray("0-4","0-7","0-12","0-20","0-33","0-57","0-97");
+						topdown = newArray("4-97","7-97","12-97","20-97","33-97","57-97");
+					}
+					else{
+						if(scelta=="1,6"){
+							soglia = newArray("0-4","0-6","0-10","0-16","0-26","0-42","0-68");
+							topdown = newArray("4-68","6-68","10-68","16-68","26-68","42-68");
+						}
+					}
+				}
+			}
+		}
+*/		
+
+// creiamo un'immagine vuota. Apriamo la prima immagine
+
+		open(subdir+sublist[0]);
+
+// La svuotiamo
+
+		run("Select All");
+		run("Clear", "stack");
+
+// la rinominiamo void
+
+		rename("void");
+		titre[0] = getTitle();
+
+		for (i=0; i<sublist.length; i++) {
+
+// Primo step: creiamo e salviamo le bottom-up 
+
+			open(subdir+sublist[i]);
+			titre[1] = getTitle();
+			imageCalculator("Add stack", titre[0], titre[1]);
+
+			selectWindow(titre[0]);
+			save(dir2+"SC"+scelta+subdirtit+File.separator+"BU_"+soglia[i]+".tif");
+			selectWindow(titre[1]);
+			close();
+		}
+
+// Secondo step: creiamo e salviamo le top-down
+
+		for (i=0; i<sublist.length-1; i++) {
+			open(subdir+sublist[i]);
+			titre[1] = getTitle();
+			
+			imageCalculator("Subtract stack", titre[0], titre[1]);
+
+			selectWindow(titre[0]);
+			save(dir2+"SC"+scelta+subdirtit+File.separator+"TD_"+topdown[i]+".tif");
+			selectWindow(titre[1]);
+			close();
+		}
+
+// Chiudiamo l'immagine void
+
+		selectWindow(titre[0]);
+		close();
+
+// Terzo step cancelliamo le bottom-up
+
+		for(i=0;i<6;i++){
+			File.delete(dir2+"SC"+scelta+subdirtit+File.separator+"BU_"+soglia[i]+".tif");
+		}
+		File.rename(dir2+"SC"+scelta+subdirtit+File.separator+"BU_"+soglia[6]+".tif",dir2+"SC"+scelta+subdirtit+File.separator+"TD_"+soglia[6]+".tif");
+
+	}
+
+// Chiusura macro
+
+	setBatchMode(false);
+
+	showMessage("Fine della Elaborazione");
+}

@@ -1,0 +1,277 @@
+/*
+Macro per la conversione in stacks di segnale binario di campioni di segnale vascolare midollare privati della componente di autofluorescenza neuronale.
+Condizioni di acquisizione: canale rosso e verde - condizioni NON "tirate"
+
+v. 0.1 del 11.10.2021
+*/ 
+
+macro "Binaria midollo"{midolla();}
+
+function midolla() {
+
+	requires("1.52p");
+
+	setBatchMode(true);
+
+// Scelta della cartella in cui salvare i risultati.
+
+	showMessage("Target folder for the stacks");
+	dirR = getDirectory("");
+		
+// Scelta della cartella contenente gli stacks da elaborare (apre volumi .czi RGB 8-bit di slices a fuoco)
+
+	showMessage("Source folder for .czi Volumes");
+	dirS = getDirectory("");
+	sorgente = getFileList(dirS);
+
+	for(i=0; i<sorgente.length; i++){
+
+		percorso = dirS+File.separator+sorgente[i];
+		dnum = i;
+		run("Bio-Formats", "open="+percorso+" autoscale color_mode=Default rois_import=[ROI manager] view=Hyperstack stack_order=XYCZT");
+		showProgress((dnum+0.4)/sorgente.length);
+		ori = getImageID();
+
+		tit = getTitle();
+		tlen = lengthOf(tit);
+		rtlen = tlen-4;
+		realtit = substring(tit, 0, rtlen);
+
+// Scelta della cartella in cui salvare i risultati.
+
+		dirT = dirR+File.separator+realtit+File.separator; 
+		File.makeDirectory(dirT);
+
+// Come salverà i risultati? Come canali e come 4 files processati
+
+		selectImage(ori);	
+		run("Split Channels");
+		redtit = "C1-"+tit;
+		greentit = "C2-"+tit;
+		selectWindow(redtit);
+		redImg = getImageID();
+		selectWindow(greentit);
+		greenImg = getImageID();
+
+		selectImage(redImg);
+		run("Duplicate...", "title=RossoBinario.tif duplicate");
+		redBin = getImageID;
+
+		selectImage(greenImg);
+		run("Duplicate...", "title=VerdeOri.tif duplicate");
+		greenMed = getImageID;
+
+// Salva i canali come immagini a 8-bit
+
+		selectImage(redImg);
+		rbd = bitDepth();
+		if(rbd != 8){
+			run("8-bit");
+		}
+		saveAs("Tiff", dirT+"a-RedChannel.tif");
+		selectImage(redImg);
+		close();
+
+		selectImage(greenImg);
+		gbd = bitDepth();
+		if(gbd != 8){
+			run("8-bit");
+		}
+		saveAs("Tiff", dirT+"b-GreenChannel.tif");
+		close();
+
+// Lavora il rosso per innalzare il contrasto
+
+		selectImage(redBin);
+		run("Enhance Contrast...", "saturated=1 normalize process_all");
+
+// Lavora il verde per innalzare il contrasto e la duplica
+
+		selectImage(greenMed);
+		run("Enhance Contrast...", "saturated=0.3 normalize process_all");
+
+// Rende le immagini a 8-bit
+
+		dbd = bitDepth();
+		if(dbd != 8){
+			run("8-bit");
+		}
+
+// Calcola dimensioni e numero delle slices dello stack e se non è uno stack arresta la macro
+    
+		DimX = getWidth();
+		DimY = getHeight();
+		DimZ = nSlices();
+		if (DimZ == 1) {
+    			exit("L'immagine selezionata non è uno stack!");
+	    	}
+		DimRz = DimZ-4;
+
+// Adesso valuta substacks fatti con 5 immagini alla volta e li proietta. Li rimonta in un file target
+
+		for(sl=1; sl<=DimRz; sl++){
+			fl=sl+4;
+			selectImage(greenMed);
+			run("Make Substack...", "  slices="+sl+"-"+fl);
+			inSub = getImageID();
+			run("Z Project...", "projection=[Average Intensity]");
+			inProj=getImageID();
+			if(sl==1){
+				run("Duplicate...", "Proiezione");
+				finStack = getImageID();
+				run("Add Slice");
+				selectImage(inProj);
+				close();
+			}
+			else{
+//				selectImage(inProj);
+				run("Select All");
+				run("Copy");
+
+				selectImage(finStack);
+				setSlice(sl);
+				run("Paste");
+				if(sl != (DimRz)){
+					run("Add Slice");
+				}
+				selectImage(inProj);
+				close();
+			}
+			selectImage(inSub);
+			close();
+		}
+
+// Completiamo lo stack finale proiettato aggiungendo le prime 2 e le ultime 2 slices originali
+
+		selectImage(finStack);
+		for(gv=0; gv<2; gv++){
+			run("Add Slice");
+		}
+		for(gv=0; gv<2; gv++){
+			setSlice(1);
+			run("Add Slice");
+		}
+
+		selectImage(finStack);
+		setSlice(1);
+		run("Select All");
+		run("Copy");
+		setSlice(3);
+		run("Select All");
+		run("Paste");
+
+		DimFz = DimRz+2;
+		for(hj=1; hj<3; hj++){
+			selectImage(greenMed);		
+			setSlice(hj);
+			run("Select All");
+			run("Copy");
+
+			selectImage(finStack);
+			setSlice(hj);
+			run("Paste");
+		}
+		for(hj=1; hj<3; hj++){
+			selectImage(greenMed);		
+			setSlice(DimFz+hj);
+			run("Select All");
+			run("Copy");
+
+			selectImage(finStack);
+			setSlice(DimFz+hj);
+			run("Paste");
+		}
+
+// Adesso calcoliamo il segnale medio di ogni slice 
+
+		newImage("Sfondo", "8-bit black", DimX, DimY, DimZ);
+		sfnd = getImageID();
+
+		for(lw=0; lw<DimZ; lw++){
+			selectImage(finStack);		
+			setSlice(lw+1);
+			run("Select All");
+			getStatistics(area, mean);
+			slmed = mean*1;
+			run("Select None");
+			setForegroundColor(slmed, slmed, slmed);
+			selectImage(sfnd);
+			setSlice(lw+1);
+			run("Select All");
+			run("Fill", "slice");
+			run("Select None");
+		}
+
+// Salva le immagini a 8-bit, toglie lo sfondo dal proiettato e continua
+
+		selectImage(finStack);
+		saveAs("Tiff", dirT+"c-vProject.tif");
+
+		selectImage(sfnd);
+		saveAs("Tiff", dirT+"d-vSfondo.tif");
+
+		imageCalculator("Subtract create stack", finStack, sfnd);
+		selfFluo = getImageID();
+
+		selectImage(greenMed);
+		close();
+		selectImage(finStack);
+		close();
+		selectImage(sfnd);
+		close();
+
+// Rendere binario lo stack del segnale rosso
+
+		selectImage(redBin);
+		setAutoThreshold("Default");
+		setOption("BlackBackground", false);
+		run("Convert to Mask", "method=Default background=Dark calculate");
+		saveAs("Tiff", dirT+"e-redVasi.tif");
+
+// Rendere binario lo stack del Segnale Verde
+
+		selectImage(selfFluo);
+
+		setAutoThreshold("Default");
+		setOption("BlackBackground", false);
+		run("Convert to Mask", "method=Default background=Dark calculate");
+
+		run("Analyze Particles...", "size=64-Infinity pixel show=Masks clear stack");
+		cleanFluo = getImageID();
+		saveAs("Tiff", dirT+"f-greenFluo.tif");
+
+		selectImage(selfFluo);
+		close();
+
+// Ora prepara l'immagine binaria [C] per sottrazione del verde dal rosso. Cioè [C] = [A] - [B]. E la salva.
+
+		imageCalculator("Subtract create stack", redBin, cleanFluo);
+		dirtyBin = getImageID();
+
+		run("Analyze Particles...", "size=5-Infinity pixel show=Masks clear stack");
+		cleanBin = getImageID();
+
+		run("Fill Holes", "stack");
+		saveAs("Tiff", dirT+"h-finBinary.tif");
+		close();
+
+// Ora chiude le immagini rimanenti e continua con il prossimo file
+
+		selectImage(redBin);
+		close();
+
+		selectImage(cleanFluo);
+		close();
+
+		selectImage(dirtyBin);
+		saveAs("Tiff", dirT+"g-binSporco.tif");
+		close();
+
+	}
+
+// Chiusura della macro
+
+	setBatchMode(false);
+
+	showMessage("End of Elaboration");
+}
